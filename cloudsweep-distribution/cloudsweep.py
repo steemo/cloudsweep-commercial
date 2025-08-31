@@ -60,7 +60,7 @@ class AWSScanner:
     def scan_unattached_volumes(self):
         volumes = []
         try:
-            response = self.ec2.describe_volumes(Filters=[{'Name': 'state', 'Values': ['available']}])
+            response = self.ec2.describe_volumes(Filters=[{'Name': 'status', 'Values': ['available']}])
             for volume in response['Volumes']:
                 age_days = (datetime.now(timezone.utc) - volume['CreateTime']).days
                 volumes.append({
