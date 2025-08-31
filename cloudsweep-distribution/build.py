@@ -22,6 +22,49 @@ def detect_platform():
     else:  # Linux and others
         return 'linux', 'cloudsweep-linux'
 
+def check_linux_dependencies():
+    """Check if required Linux dependencies are available"""
+    required_commands = ['gcc', 'objdump']
+    missing = []
+    
+    for cmd in required_commands:
+        if not shutil.which(cmd):
+            missing.append(cmd)
+    
+    if missing:
+        print(f"❌ Missing system dependencies: {', '.join(missing)}")
+        print("📋 Required packages:")
+        print("  Ubuntu/Debian: sudo apt-get install build-essential binutils")
+        print("  CentOS/RHEL:   sudo yum install gcc gcc-c++ binutils")
+        print("  Fedora:        sudo dnf install gcc gcc-c++ binutils")
+        print("  Alpine:        sudo apk add gcc musl-dev binutils")
+        return False
+    
+    return True
+
+def check_macos_dependencies():
+    """Check if required macOS dependencies are available"""
+    # Check for Xcode Command Line Tools
+    try:
+        subprocess.run(['xcode-select', '-p'], check=True, capture_output=True)
+        return True
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        print("❌ Xcode Command Line Tools not found")
+        print("📋 Install with: xcode-select --install")
+        return False
+
+def check_windows_dependencies():
+    """Check if required Windows dependencies are available"""
+    # Check for Visual C++ compiler (cl.exe)
+    if shutil.which('cl'):
+        return True
+    
+    print("❌ Visual C++ Build Tools not found")
+    print("📋 Required for PyInstaller on Windows")
+    print("  Download: https://visualstudio.microsoft.com/visual-cpp-build-tools/")
+    print("  Or install Visual Studio with C++ development tools")
+    return False
+
 def install_pyinstaller():
     """Install PyInstaller if not available"""
     try:
@@ -68,6 +111,23 @@ def main():
     platform_name, exe_name = detect_platform()
     print(f"🖥️  Platform detected: {platform_name}")
     print(f"📁 Building: {exe_name}")
+    
+    # Check system dependencies based on platform
+    if platform_name == 'linux':
+        if not check_linux_dependencies():
+            print("❌ Missing system dependencies")
+            print("💡 Run the installer with sudo to install dependencies")
+            return False
+    elif platform_name == 'macos':
+        if not check_macos_dependencies():
+            print("❌ Missing system dependencies")
+            print("💡 Run: xcode-select --install")
+            return False
+    elif platform_name == 'windows':
+        if not check_windows_dependencies():
+            print("❌ Missing system dependencies")
+            print("💡 Install Visual C++ Build Tools")
+            return False
     
     # Install PyInstaller
     if not install_pyinstaller():
