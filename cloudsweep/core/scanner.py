@@ -21,6 +21,7 @@ from scanners.rds_instances import scan_rds_instances
 from scanners.cloudfront_distributions import scan_cloudfront_distributions
 from scanners.lambda_functions import scan_lambda_functions
 from scanners.s3_buckets import scan_s3_buckets
+from scanners.ecs_services import scan_ecs_services
 
 class AWSScanner:
     def __init__(self, profile='default', region='us-east-1'):
@@ -143,6 +144,10 @@ class AWSScanner:
     def scan_s3_buckets(self):
         """Find empty and unused S3 buckets incurring costs"""
         return scan_s3_buckets(self.session, self.region)
+    
+    def scan_ecs_services(self):
+        """Find unused and underutilized ECS services incurring costs"""
+        return scan_ecs_services(self.session, self.region)
     
     def get_account_info(self):
         """Get AWS account information"""

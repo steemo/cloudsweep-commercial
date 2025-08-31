@@ -54,6 +54,7 @@ class AWSScanner:
         self.cloudfront = None
         self.lambda_client = None
         self.s3 = None
+        self.ecs = None
         
     def connect(self):
         try:
@@ -71,6 +72,7 @@ class AWSScanner:
             self.cloudfront = self.session.client('cloudfront', region_name='us-east-1')
             self.lambda_client = self.session.client('lambda')
             self.s3 = self.session.client('s3')
+            self.ecs = self.session.client('ecs')
             
         except ProfileNotFound:
             # Fallback to default credentials (CloudShell, EC2 roles, etc.)
@@ -83,6 +85,7 @@ class AWSScanner:
                 self.cloudfront = self.session.client('cloudfront', region_name='us-east-1')
                 self.lambda_client = self.session.client('lambda')
                 self.s3 = self.session.client('s3')
+                self.ecs = self.session.client('ecs')
             except (NoCredentialsError, ClientError) as e:
                 raise Exception(f"AWS credentials not found. In CloudShell they should be automatic. Try: aws sts get-caller-identity")
         except (NoCredentialsError, ClientError) as e:
@@ -517,6 +520,45 @@ class AWSScanner:
             return sample_size / (1024 ** 3)  # Convert to GB
         except Exception:
             return 0
+    
+    def scan_ecs_services(self):
+        services = []
+        try:
+            clusters = self.ecs.list_clusters()
+            for cluster_arn in clusters['clusterArns']:
+                cluster_name = cluster_arn.split('/')[-1]
+                
+                cluster_services = self.ecs.list_services(cluster=cluster_arn)
+                for service_arn in cluster_services['serviceArns']:
+                    service_name = service_arn.split('/')[-1]
+                    
+                    service_details = self.ecs.describe_services(
+                        cluster=cluster_arn,
+                        services=[service_arn]
+                    )
+                    
+                    if service_details['services']:
+                        service = service_details['services'][0]
+                        created_at = service['createdAt']
+                        age_days = (datetime.now(timezone.utc) - created_at.replace(tzinfo=timezone.utc)).days
+                        
+                        if age_days > 30:  # Only check old services
+                            desired_count = service['desiredCount']
+                            running_count = service['runningCount']
+                            
+                            if desired_count == 0 and running_count == 0:
+                                services.append({
+                                    'type': 'ecs_unused',
+                                    'id': f"{cluster_name}/{service_name}",
+                                    'cluster_name': cluster_name,
+                                    'service_name': service_name,
+                                    'launch_type': service.get('launchType', 'EC2'),
+                                    'age_days': age_days,
+                                    'created': created_at.isoformat()
+                                })
+        except Exception as e:
+            print(f"Error scanning ECS services: {e}")
+        return services
 
 class CostCalculator:
     def __init__(self, region='us-east-1'):
@@ -611,6 +653,13 @@ class CostCalculator:
             storage_gb = item.get('storage_gb', 1)
             return storage_gb * 0.023  # S3 Standard storage cost
         
+        elif item_type == 'ecs_unused':
+            launch_type = item.get('launch_type', 'EC2')
+            if launch_type == 'FARGATE':
+                return 25.00  # Estimated monthly cost for unused Fargate service
+            else:
+                return 5.00  # Base cost for unused EC2-based ECS service
+        
         return 0
 
 @click.group()
@@ -681,12 +730,15 @@ def scan(profile, region, output):
         click.echo(f"{Fore.YELLOW}🔍 Scanning S3 buckets...{Style.RESET_ALL}")
         waste_items.extend(scanner.scan_s3_buckets())
         
+        click.echo(f"{Fore.YELLOW}🔍 Scanning ECS services...{Style.RESET_ALL}")
+        waste_items.extend(scanner.scan_ecs_services())
+        
         click.echo(f"{Fore.GREEN}✅ Scan complete!{Style.RESET_ALL}")
         
         if waste_items:
             savings = cost_calc.calculate_total_savings(waste_items)
             
-            click.echo(f"{Fore.GREEN}🎯 Found {len(waste_items)} waste items across 13 AWS services{Style.RESET_ALL}")
+            click.echo(f"{Fore.GREEN}🎯 Found {len(waste_items)} waste items across 14 AWS services{Style.RESET_ALL}")
             click.echo(f"{Fore.CYAN}💰 Monthly savings: £{savings['total_monthly_savings']}{Style.RESET_ALL}")
             click.echo(f"{Fore.CYAN}💰 Annual savings: £{savings['total_annual_savings']}{Style.RESET_ALL}")
             
