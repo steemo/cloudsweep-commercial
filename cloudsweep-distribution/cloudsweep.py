@@ -933,11 +933,13 @@ def cli():
 @click.option('--profile', default=None, help='AWS profile to use (optional in CloudShell)')
 @click.option('--region', default='us-east-1', help='AWS region to scan')
 @click.option('--output', default='scan-results.json', help='Output file for results')
-def scan(profile, region, output):
+@click.option('--days', default=30, type=int, help='Number of days to look back for usage analysis (default: 30)')
+def scan(profile, region, output, days):
     """Scan AWS account for cost optimization opportunities"""
     click.echo(f"{Fore.GREEN}🔍 CloudSweep Scanner v1.0.0{Style.RESET_ALL}")
     click.echo(f"Profile: {profile}")
     click.echo(f"Region: {region}")
+    click.echo(f"Days lookback: {days} (S3: {days*3}, AMIs: {days*6})")
     
     try:
         scanner = AWSScanner(profile=profile, region=region)

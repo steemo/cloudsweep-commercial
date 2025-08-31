@@ -29,11 +29,13 @@ def cli():
 @click.option('--profile', default='default', help='AWS profile to use')
 @click.option('--region', default='us-east-1', help='AWS region to scan')
 @click.option('--output', default='scan-results.json', help='Output file for results')
-def scan(profile, region, output):
+@click.option('--days', default=30, type=int, help='Number of days to look back for usage analysis (default: 30)')
+def scan(profile, region, output, days):
     """Scan AWS account for cost optimization opportunities"""
     click.echo(f"{Fore.GREEN}🔍 CloudSweep Scanner v0.1.0{Style.RESET_ALL}")
     click.echo(f"Profile: {profile}")
     click.echo(f"Region: {region}")
+    click.echo(f"Days lookback: {days} (S3: {days*3}, AMIs: {days*6})")
     
     try:
         # Initialize scanner
@@ -47,55 +49,55 @@ def scan(profile, region, output):
         click.echo(f"Account: {account_info['account_id']}")
         
         click.echo(f"{Fore.YELLOW}Scanning for unattached EBS volumes...{Style.RESET_ALL}")
-        waste_volumes = scanner.scan_unattached_volumes()
+        waste_volumes = scanner.scan_unattached_volumes(days)
         
         click.echo(f"{Fore.YELLOW}Scanning for orphaned EBS snapshots...{Style.RESET_ALL}")
-        waste_snapshots = scanner.scan_orphaned_snapshots()
+        waste_snapshots = scanner.scan_orphaned_snapshots(days)
         
         click.echo(f"{Fore.YELLOW}Scanning for unassociated Elastic IPs...{Style.RESET_ALL}")
-        waste_ips = scanner.scan_unassociated_ips()
+        waste_ips = scanner.scan_unassociated_ips(days)
         
         click.echo(f"{Fore.YELLOW}Scanning for unused Load Balancers...{Style.RESET_ALL}")
-        waste_load_balancers = scanner.scan_unused_load_balancers()
+        waste_load_balancers = scanner.scan_unused_load_balancers(days)
         
         click.echo(f"{Fore.YELLOW}Scanning for unused NAT Gateways...{Style.RESET_ALL}")
-        waste_nat_gateways = scanner.scan_unused_nat_gateways()
+        waste_nat_gateways = scanner.scan_unused_nat_gateways(days)
         
         click.echo(f"{Fore.YELLOW}Scanning for stopped EC2 instances...{Style.RESET_ALL}")
-        waste_stopped_instances = scanner.scan_stopped_instances()
+        waste_stopped_instances = scanner.scan_stopped_instances(days)
         
         click.echo(f"{Fore.YELLOW}Scanning for orphaned target groups...{Style.RESET_ALL}")
-        waste_target_groups = scanner.scan_orphaned_target_groups()
+        waste_target_groups = scanner.scan_orphaned_target_groups(days)
         
         click.echo(f"{Fore.YELLOW}Scanning for unattached network interfaces...{Style.RESET_ALL}")
-        waste_enis = scanner.scan_unattached_enis()
+        waste_enis = scanner.scan_unattached_enis(days)
         
         click.echo(f"{Fore.YELLOW}Scanning for old/unused AMIs...{Style.RESET_ALL}")
-        waste_amis = scanner.scan_old_unused_amis()
+        waste_amis = scanner.scan_old_unused_amis(days * 6)  # AMIs use 6x multiplier
         
         click.echo(f"{Fore.YELLOW}Scanning for stopped/unused RDS instances...{Style.RESET_ALL}")
-        waste_rds = scanner.scan_rds_instances()
+        waste_rds = scanner.scan_rds_instances(days)
         
         click.echo(f"{Fore.YELLOW}Scanning for unused CloudFront distributions...{Style.RESET_ALL}")
-        waste_cloudfront = scanner.scan_cloudfront_distributions()
+        waste_cloudfront = scanner.scan_cloudfront_distributions(days)
         
         click.echo(f"{Fore.YELLOW}Scanning for unused/over-provisioned Lambda functions...{Style.RESET_ALL}")
-        waste_lambda = scanner.scan_lambda_functions()
+        waste_lambda = scanner.scan_lambda_functions(days)
         
         click.echo(f"{Fore.YELLOW}Scanning for empty/unused S3 buckets...{Style.RESET_ALL}")
-        waste_s3 = scanner.scan_s3_buckets()
+        waste_s3 = scanner.scan_s3_buckets(days * 3)  # S3 uses 3x multiplier
         
         click.echo(f"{Fore.YELLOW}Scanning for unused/underutilized ECS services...{Style.RESET_ALL}")
-        waste_ecs = scanner.scan_ecs_services()
+        waste_ecs = scanner.scan_ecs_services(days)
         
         click.echo(f"{Fore.YELLOW}Scanning for unused API Gateway APIs...{Style.RESET_ALL}")
-        waste_api_gateway = scanner.scan_api_gateway()
+        waste_api_gateway = scanner.scan_api_gateway(days)
         
         click.echo(f"{Fore.YELLOW}Scanning for unused Elasticsearch/OpenSearch clusters...{Style.RESET_ALL}")
-        waste_elasticsearch = scanner.scan_elasticsearch_clusters()
+        waste_elasticsearch = scanner.scan_elasticsearch_clusters(days)
         
         click.echo(f"{Fore.YELLOW}Scanning for unused/underutilized Redshift clusters...{Style.RESET_ALL}")
-        waste_redshift = scanner.scan_redshift_clusters()
+        waste_redshift = scanner.scan_redshift_clusters(days)
         
         # Combine all waste items
         all_waste_items = waste_volumes + waste_snapshots + waste_ips + waste_load_balancers + waste_nat_gateways + waste_stopped_instances + waste_target_groups + waste_enis + waste_amis + waste_rds + waste_cloudfront + waste_lambda + waste_s3 + waste_ecs + waste_api_gateway + waste_elasticsearch + waste_redshift

@@ -132,37 +132,37 @@ class AWSScanner:
         ami_scanner = AMIScanner(self.ec2_client)
         return ami_scanner.scan_old_unused_amis()
     
-    def scan_rds_instances(self):
+    def scan_rds_instances(self, days=30):
         """Find stopped and unused RDS instances incurring costs"""
-        return scan_rds_instances(self.session, self.region)
+        return scan_rds_instances(self.session, self.region, days)
     
-    def scan_cloudfront_distributions(self):
+    def scan_cloudfront_distributions(self, days=30):
         """Find unused CloudFront distributions incurring costs"""
-        return scan_cloudfront_distributions(self.session, self.region)
+        return scan_cloudfront_distributions(self.session, self.region, days)
     
-    def scan_lambda_functions(self):
+    def scan_lambda_functions(self, days=30):
         """Find unused and over-provisioned Lambda functions incurring costs"""
-        return scan_lambda_functions(self.session, self.region)
+        return scan_lambda_functions(self.session, self.region, days)
     
-    def scan_s3_buckets(self):
+    def scan_s3_buckets(self, days=90):
         """Find empty and unused S3 buckets incurring costs"""
-        return scan_s3_buckets(self.session, self.region)
+        return scan_s3_buckets(self.session, self.region, days)
     
-    def scan_ecs_services(self):
+    def scan_ecs_services(self, days=30):
         """Find unused and underutilized ECS services incurring costs"""
-        return scan_ecs_services(self.session, self.region)
+        return scan_ecs_services(self.session, self.region, days)
     
-    def scan_api_gateway(self):
+    def scan_api_gateway(self, days=30):
         """Find unused API Gateway REST and HTTP APIs incurring costs"""
-        return scan_api_gateway(self.session, self.region)
+        return scan_api_gateway(self.session, self.region, days)
     
-    def scan_elasticsearch_clusters(self):
+    def scan_elasticsearch_clusters(self, days=30):
         """Find unused Elasticsearch and OpenSearch clusters incurring costs"""
-        return scan_elasticsearch_clusters(self.session, self.region)
+        return scan_elasticsearch_clusters(self.session, self.region, days)
     
-    def scan_redshift_clusters(self):
+    def scan_redshift_clusters(self, days=30):
         """Find unused and underutilized Redshift clusters incurring costs"""
-        return scan_redshift_clusters(self.session, self.region)
+        return scan_redshift_clusters(self.session, self.region, days)
     
     def get_account_info(self):
         """Get AWS account information"""
