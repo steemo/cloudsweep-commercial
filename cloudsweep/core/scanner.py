@@ -19,6 +19,8 @@ from scanners.network_interfaces import NetworkInterfaceScanner
 from scanners.amis import AMIScanner
 from scanners.rds_instances import scan_rds_instances
 from scanners.cloudfront_distributions import scan_cloudfront_distributions
+from scanners.lambda_functions import scan_lambda_functions
+from scanners.s3_buckets import scan_s3_buckets
 
 class AWSScanner:
     def __init__(self, profile='default', region='us-east-1'):
@@ -133,6 +135,14 @@ class AWSScanner:
     def scan_cloudfront_distributions(self):
         """Find unused CloudFront distributions incurring costs"""
         return scan_cloudfront_distributions(self.session, self.region)
+    
+    def scan_lambda_functions(self):
+        """Find unused and over-provisioned Lambda functions incurring costs"""
+        return scan_lambda_functions(self.session, self.region)
+    
+    def scan_s3_buckets(self):
+        """Find empty and unused S3 buckets incurring costs"""
+        return scan_s3_buckets(self.session, self.region)
     
     def get_account_info(self):
         """Get AWS account information"""

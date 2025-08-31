@@ -25,6 +25,8 @@ class AWSScanner:
         self.rds = None
         self.cloudwatch = None
         self.cloudfront = None
+        self.lambda_client = None
+        self.s3 = None
         
     def connect(self):
         try:
@@ -40,6 +42,8 @@ class AWSScanner:
             self.rds = self.session.client('rds')
             self.cloudwatch = self.session.client('cloudwatch')
             self.cloudfront = self.session.client('cloudfront', region_name='us-east-1')
+            self.lambda_client = self.session.client('lambda')
+            self.s3 = self.session.client('s3')
             
         except ProfileNotFound:
             # Fallback to default credentials (CloudShell, EC2 roles, etc.)
@@ -50,6 +54,8 @@ class AWSScanner:
                 self.rds = self.session.client('rds')
                 self.cloudwatch = self.session.client('cloudwatch')
                 self.cloudfront = self.session.client('cloudfront', region_name='us-east-1')
+                self.lambda_client = self.session.client('lambda')
+                self.s3 = self.session.client('s3')
             except (NoCredentialsError, ClientError) as e:
                 raise Exception(f"AWS credentials not found. In CloudShell they should be automatic. Try: aws sts get-caller-identity")
         except (NoCredentialsError, ClientError) as e:
@@ -360,6 +366,130 @@ class AWSScanner:
             return total_requests == 0
         except Exception:
             return False  # Conservative approach
+    
+    def scan_lambda_functions(self):
+        functions = []
+        try:
+            response = self.lambda_client.list_functions()
+            for func in response['Functions']:
+                func_name = func['FunctionName']
+                memory_size = func['MemorySize']
+                last_modified = func['LastModified']
+                
+                # Parse date and check age
+                last_modified_date = datetime.strptime(last_modified, '%Y-%m-%dT%H:%M:%S.%f%z')
+                age_days = (datetime.now(timezone.utc) - last_modified_date.replace(tzinfo=timezone.utc)).days
+                
+                if age_days > 30:  # Only check old functions
+                    if self._check_lambda_unused(func_name):
+                        functions.append({
+                            'type': 'lambda_unused',
+                            'id': func_name,
+                            'memory_size': memory_size,
+                            'runtime': func['Runtime'],
+                            'age_days': age_days,
+                            'last_modified': last_modified
+                        })
+        except Exception as e:
+            print(f"Error scanning Lambda functions: {e}")
+        return functions
+    
+    def _check_lambda_unused(self, function_name):
+        try:
+            from datetime import timedelta
+            end_time = datetime.utcnow()
+            start_time = end_time - timedelta(days=30)
+            
+            response = self.cloudwatch.get_metric_statistics(
+                Namespace='AWS/Lambda',
+                MetricName='Invocations',
+                Dimensions=[{'Name': 'FunctionName', 'Value': function_name}],
+                StartTime=start_time,
+                EndTime=end_time,
+                Period=86400,
+                Statistics=['Sum']
+            )
+            
+            if not response['Datapoints']:
+                return True
+            
+            total_invocations = sum([point['Sum'] for point in response['Datapoints']])
+            return total_invocations == 0
+        except Exception:
+            return False
+    
+    def scan_s3_buckets(self):
+        buckets = []
+        try:
+            response = self.s3.list_buckets()
+            for bucket in response['Buckets']:
+                bucket_name = bucket['Name']
+                creation_date = bucket['CreationDate']
+                age_days = (datetime.now(timezone.utc) - creation_date.replace(tzinfo=timezone.utc)).days
+                
+                if age_days > 30:  # Only check old buckets
+                    if self._check_bucket_empty(bucket_name):
+                        buckets.append({
+                            'type': 's3_empty',
+                            'id': bucket_name,
+                            'age_days': age_days,
+                            'created': creation_date.isoformat()
+                        })
+                    elif self._check_bucket_unused(bucket_name):
+                        storage_gb = self._get_bucket_size(bucket_name)
+                        if storage_gb > 0.1:  # Only flag if significant storage
+                            buckets.append({
+                                'type': 's3_unused',
+                                'id': bucket_name,
+                                'storage_gb': storage_gb,
+                                'age_days': age_days,
+                                'created': creation_date.isoformat()
+                            })
+        except Exception as e:
+            print(f"Error scanning S3 buckets: {e}")
+        return buckets
+    
+    def _check_bucket_empty(self, bucket_name):
+        try:
+            response = self.s3.list_objects_v2(Bucket=bucket_name, MaxKeys=1)
+            return 'Contents' not in response
+        except Exception:
+            return False
+    
+    def _check_bucket_unused(self, bucket_name):
+        try:
+            from datetime import timedelta
+            end_time = datetime.utcnow()
+            start_time = end_time - timedelta(days=90)
+            
+            response = self.cloudwatch.get_metric_statistics(
+                Namespace='AWS/S3',
+                MetricName='AllRequests',
+                Dimensions=[{'Name': 'BucketName', 'Value': bucket_name}],
+                StartTime=start_time,
+                EndTime=end_time,
+                Period=86400,
+                Statistics=['Sum']
+            )
+            
+            if not response['Datapoints']:
+                return True
+            
+            total_requests = sum([point['Sum'] for point in response['Datapoints']])
+            return total_requests == 0
+        except Exception:
+            return False
+    
+    def _get_bucket_size(self, bucket_name):
+        try:
+            response = self.s3.list_objects_v2(Bucket=bucket_name, MaxKeys=100)
+            if 'Contents' not in response:
+                return 0
+            
+            sample_size = sum([obj['Size'] for obj in response['Contents']])
+            return sample_size / (1024 ** 3)  # Convert to GB
+        except Exception:
+            return 0
 
 class CostCalculator:
     def __init__(self, region='us-east-1'):
@@ -444,6 +574,16 @@ class CostCalculator:
         elif item_type == 'cloudfront_distribution':
             return 15.00  # Estimated monthly cost for unused CloudFront distribution
         
+        elif item_type == 'lambda_unused':
+            return 5.00  # Estimated monthly cost for unused Lambda function
+        
+        elif item_type == 's3_empty':
+            return 1.00  # Base cost for empty S3 bucket
+        
+        elif item_type == 's3_unused':
+            storage_gb = item.get('storage_gb', 1)
+            return storage_gb * 0.023  # S3 Standard storage cost
+        
         return 0
 
 @click.group()
@@ -487,6 +627,8 @@ def scan(profile, region, output):
         waste_items.extend(scanner.scan_old_unused_amis())
         waste_items.extend(scanner.scan_rds_instances())
         waste_items.extend(scanner.scan_cloudfront_distributions())
+        waste_items.extend(scanner.scan_lambda_functions())
+        waste_items.extend(scanner.scan_s3_buckets())
         
         if waste_items:
             savings = cost_calc.calculate_total_savings(waste_items)
