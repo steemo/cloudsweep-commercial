@@ -57,6 +57,8 @@ class AWSScanner:
         self.ecs = None
         self.apigateway = None
         self.apigatewayv2 = None
+        self.es = None
+        self.opensearch = None
         
     def connect(self):
         try:
@@ -77,6 +79,8 @@ class AWSScanner:
             self.ecs = self.session.client('ecs')
             self.apigateway = self.session.client('apigateway')
             self.apigatewayv2 = self.session.client('apigatewayv2')
+            self.es = self.session.client('es')
+            self.opensearch = self.session.client('opensearch')
             
         except ProfileNotFound:
             # Fallback to default credentials (CloudShell, EC2 roles, etc.)
@@ -92,6 +96,8 @@ class AWSScanner:
                 self.ecs = self.session.client('ecs')
                 self.apigateway = self.session.client('apigateway')
                 self.apigatewayv2 = self.session.client('apigatewayv2')
+                self.es = self.session.client('es')
+                self.opensearch = self.session.client('opensearch')
             except (NoCredentialsError, ClientError) as e:
                 raise Exception(f"AWS credentials not found. In CloudShell they should be automatic. Try: aws sts get-caller-identity")
         except (NoCredentialsError, ClientError) as e:
@@ -633,6 +639,88 @@ class AWSScanner:
             return total_requests == 0
         except Exception:
             return False
+    
+    def scan_elasticsearch_clusters(self):
+        clusters = []
+        try:
+            # Scan Elasticsearch domains
+            es_domains = self.es.list_domain_names()
+            for domain_info in es_domains['DomainNames']:
+                domain_name = domain_info['DomainName']
+                
+                domain_details = self.es.describe_elasticsearch_domain(DomainName=domain_name)
+                domain = domain_details['DomainStatus']
+                
+                if not domain.get('Processing', False):  # Skip processing domains
+                    created_time = domain['Created']
+                    age_days = (datetime.now(timezone.utc) - created_time.replace(tzinfo=timezone.utc)).days
+                    
+                    if age_days > 30:  # Only check old domains
+                        if self._check_elasticsearch_unused(domain_name, 'Elasticsearch'):
+                            clusters.append({
+                                'type': 'elasticsearch_unused',
+                                'id': domain_name,
+                                'service_type': 'Elasticsearch',
+                                'instance_type': domain.get('ElasticsearchClusterConfig', {}).get('InstanceType', 'Unknown'),
+                                'instance_count': domain.get('ElasticsearchClusterConfig', {}).get('InstanceCount', 1),
+                                'age_days': age_days,
+                                'created': created_time.isoformat()
+                            })
+            
+            # Scan OpenSearch domains
+            try:
+                opensearch_domains = self.opensearch.list_domain_names()
+                for domain_info in opensearch_domains['DomainNames']:
+                    domain_name = domain_info['DomainName']
+                    
+                    domain_details = self.opensearch.describe_domain(DomainName=domain_name)
+                    domain = domain_details['DomainStatus']
+                    
+                    if not domain.get('Processing', False):  # Skip processing domains
+                        created_time = domain['Created']
+                        age_days = (datetime.now(timezone.utc) - created_time.replace(tzinfo=timezone.utc)).days
+                        
+                        if age_days > 30:  # Only check old domains
+                            if self._check_elasticsearch_unused(domain_name, 'OpenSearch'):
+                                clusters.append({
+                                    'type': 'opensearch_unused',
+                                    'id': domain_name,
+                                    'service_type': 'OpenSearch',
+                                    'instance_type': domain.get('ClusterConfig', {}).get('InstanceType', 'Unknown'),
+                                    'instance_count': domain.get('ClusterConfig', {}).get('InstanceCount', 1),
+                                    'age_days': age_days,
+                                    'created': created_time.isoformat()
+                                })
+            except Exception:
+                pass  # OpenSearch might not be available in all regions
+                
+        except Exception as e:
+            print(f"Error scanning Elasticsearch/OpenSearch: {e}")
+        return clusters
+    
+    def _check_elasticsearch_unused(self, domain_name, service_type):
+        try:
+            from datetime import timedelta
+            end_time = datetime.utcnow()
+            start_time = end_time - timedelta(days=30)
+            
+            response = self.cloudwatch.get_metric_statistics(
+                Namespace=f'AWS/{service_type}',
+                MetricName='SearchRate',
+                Dimensions=[{'Name': 'DomainName', 'Value': domain_name}],
+                StartTime=start_time,
+                EndTime=end_time,
+                Period=86400,
+                Statistics=['Sum']
+            )
+            
+            if not response['Datapoints']:
+                return True
+            
+            total_searches = sum([point['Sum'] for point in response['Datapoints']])
+            return total_searches == 0
+        except Exception:
+            return False
 
 class CostCalculator:
     def __init__(self, region='us-east-1'):
@@ -740,6 +828,18 @@ class CostCalculator:
         elif item_type == 'api_gateway_http':
             return 5.00  # Estimated monthly cost for unused HTTP API
         
+        elif item_type == 'elasticsearch_unused':
+            instance_type = item.get('instance_type', 't3.small.elasticsearch')
+            instance_count = item.get('instance_count', 1)
+            base_cost = 50.00 if 'small' in instance_type else 120.00
+            return base_cost * instance_count
+        
+        elif item_type == 'opensearch_unused':
+            instance_type = item.get('instance_type', 't3.small.search')
+            instance_count = item.get('instance_count', 1)
+            base_cost = 50.00 if 'small' in instance_type else 120.00
+            return base_cost * instance_count
+        
         return 0
 
 @click.group()
@@ -816,12 +916,15 @@ def scan(profile, region, output):
         click.echo(f"{Fore.YELLOW}🔍 Scanning API Gateway...{Style.RESET_ALL}")
         waste_items.extend(scanner.scan_api_gateway())
         
+        click.echo(f"{Fore.YELLOW}🔍 Scanning Elasticsearch/OpenSearch...{Style.RESET_ALL}")
+        waste_items.extend(scanner.scan_elasticsearch_clusters())
+        
         click.echo(f"{Fore.GREEN}✅ Scan complete!{Style.RESET_ALL}")
         
         if waste_items:
             savings = cost_calc.calculate_total_savings(waste_items)
             
-            click.echo(f"{Fore.GREEN}🎯 Found {len(waste_items)} waste items across 15 AWS services{Style.RESET_ALL}")
+            click.echo(f"{Fore.GREEN}🎯 Found {len(waste_items)} waste items across 16 AWS services{Style.RESET_ALL}")
             click.echo(f"{Fore.CYAN}💰 Monthly savings: £{savings['total_monthly_savings']}{Style.RESET_ALL}")
             click.echo(f"{Fore.CYAN}💰 Annual savings: £{savings['total_annual_savings']}{Style.RESET_ALL}")
             
