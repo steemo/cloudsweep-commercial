@@ -22,6 +22,7 @@ from scanners.cloudfront_distributions import scan_cloudfront_distributions
 from scanners.lambda_functions import scan_lambda_functions
 from scanners.s3_buckets import scan_s3_buckets
 from scanners.ecs_services import scan_ecs_services
+from scanners.api_gateway import scan_api_gateway
 
 class AWSScanner:
     def __init__(self, profile='default', region='us-east-1'):
@@ -148,6 +149,10 @@ class AWSScanner:
     def scan_ecs_services(self):
         """Find unused and underutilized ECS services incurring costs"""
         return scan_ecs_services(self.session, self.region)
+    
+    def scan_api_gateway(self):
+        """Find unused API Gateway REST and HTTP APIs incurring costs"""
+        return scan_api_gateway(self.session, self.region)
     
     def get_account_info(self):
         """Get AWS account information"""

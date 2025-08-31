@@ -55,6 +55,8 @@ class AWSScanner:
         self.lambda_client = None
         self.s3 = None
         self.ecs = None
+        self.apigateway = None
+        self.apigatewayv2 = None
         
     def connect(self):
         try:
@@ -73,6 +75,8 @@ class AWSScanner:
             self.lambda_client = self.session.client('lambda')
             self.s3 = self.session.client('s3')
             self.ecs = self.session.client('ecs')
+            self.apigateway = self.session.client('apigateway')
+            self.apigatewayv2 = self.session.client('apigatewayv2')
             
         except ProfileNotFound:
             # Fallback to default credentials (CloudShell, EC2 roles, etc.)
@@ -86,6 +90,8 @@ class AWSScanner:
                 self.lambda_client = self.session.client('lambda')
                 self.s3 = self.session.client('s3')
                 self.ecs = self.session.client('ecs')
+                self.apigateway = self.session.client('apigateway')
+                self.apigatewayv2 = self.session.client('apigatewayv2')
             except (NoCredentialsError, ClientError) as e:
                 raise Exception(f"AWS credentials not found. In CloudShell they should be automatic. Try: aws sts get-caller-identity")
         except (NoCredentialsError, ClientError) as e:
@@ -559,6 +565,74 @@ class AWSScanner:
         except Exception as e:
             print(f"Error scanning ECS services: {e}")
         return services
+    
+    def scan_api_gateway(self):
+        apis = []
+        try:
+            # Scan REST APIs
+            rest_apis = self.apigateway.get_rest_apis()
+            for api in rest_apis['items']:
+                api_id = api['id']
+                api_name = api['name']
+                created_date = api['createdDate']
+                age_days = (datetime.now(timezone.utc) - created_date.replace(tzinfo=timezone.utc)).days
+                
+                if age_days > 30:  # Only check old APIs
+                    if self._check_api_unused(api_id, 'REST'):
+                        apis.append({
+                            'type': 'api_gateway_rest',
+                            'id': api_id,
+                            'name': api_name,
+                            'api_type': 'REST',
+                            'age_days': age_days,
+                            'created': created_date.isoformat()
+                        })
+            
+            # Scan HTTP APIs
+            http_apis = self.apigatewayv2.get_apis()
+            for api in http_apis['Items']:
+                api_id = api['ApiId']
+                api_name = api['Name']
+                created_date = api['CreatedDate']
+                age_days = (datetime.now(timezone.utc) - created_date.replace(tzinfo=timezone.utc)).days
+                
+                if age_days > 30:  # Only check old APIs
+                    if self._check_api_unused(api_id, 'HTTP'):
+                        apis.append({
+                            'type': 'api_gateway_http',
+                            'id': api_id,
+                            'name': api_name,
+                            'api_type': 'HTTP',
+                            'age_days': age_days,
+                            'created': created_date.isoformat()
+                        })
+        except Exception as e:
+            print(f"Error scanning API Gateway: {e}")
+        return apis
+    
+    def _check_api_unused(self, api_id, api_type):
+        try:
+            from datetime import timedelta
+            end_time = datetime.utcnow()
+            start_time = end_time - timedelta(days=30)
+            
+            response = self.cloudwatch.get_metric_statistics(
+                Namespace='AWS/ApiGateway',
+                MetricName='Count',
+                Dimensions=[{'Name': 'ApiName' if api_type == 'REST' else 'ApiId', 'Value': api_id}],
+                StartTime=start_time,
+                EndTime=end_time,
+                Period=86400,
+                Statistics=['Sum']
+            )
+            
+            if not response['Datapoints']:
+                return True
+            
+            total_requests = sum([point['Sum'] for point in response['Datapoints']])
+            return total_requests == 0
+        except Exception:
+            return False
 
 class CostCalculator:
     def __init__(self, region='us-east-1'):
@@ -660,6 +734,12 @@ class CostCalculator:
             else:
                 return 5.00  # Base cost for unused EC2-based ECS service
         
+        elif item_type == 'api_gateway_rest':
+            return 10.00  # Estimated monthly cost for unused REST API
+        
+        elif item_type == 'api_gateway_http':
+            return 5.00  # Estimated monthly cost for unused HTTP API
+        
         return 0
 
 @click.group()
@@ -733,12 +813,15 @@ def scan(profile, region, output):
         click.echo(f"{Fore.YELLOW}🔍 Scanning ECS services...{Style.RESET_ALL}")
         waste_items.extend(scanner.scan_ecs_services())
         
+        click.echo(f"{Fore.YELLOW}🔍 Scanning API Gateway...{Style.RESET_ALL}")
+        waste_items.extend(scanner.scan_api_gateway())
+        
         click.echo(f"{Fore.GREEN}✅ Scan complete!{Style.RESET_ALL}")
         
         if waste_items:
             savings = cost_calc.calculate_total_savings(waste_items)
             
-            click.echo(f"{Fore.GREEN}🎯 Found {len(waste_items)} waste items across 14 AWS services{Style.RESET_ALL}")
+            click.echo(f"{Fore.GREEN}🎯 Found {len(waste_items)} waste items across 15 AWS services{Style.RESET_ALL}")
             click.echo(f"{Fore.CYAN}💰 Monthly savings: £{savings['total_monthly_savings']}{Style.RESET_ALL}")
             click.echo(f"{Fore.CYAN}💰 Annual savings: £{savings['total_annual_savings']}{Style.RESET_ALL}")
             

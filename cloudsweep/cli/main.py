@@ -88,8 +88,11 @@ def scan(profile, region, output):
         click.echo(f"{Fore.YELLOW}Scanning for unused/underutilized ECS services...{Style.RESET_ALL}")
         waste_ecs = scanner.scan_ecs_services()
         
+        click.echo(f"{Fore.YELLOW}Scanning for unused API Gateway APIs...{Style.RESET_ALL}")
+        waste_api_gateway = scanner.scan_api_gateway()
+        
         # Combine all waste items
-        all_waste_items = waste_volumes + waste_snapshots + waste_ips + waste_load_balancers + waste_nat_gateways + waste_stopped_instances + waste_target_groups + waste_enis + waste_amis + waste_rds + waste_cloudfront + waste_lambda + waste_s3 + waste_ecs
+        all_waste_items = waste_volumes + waste_snapshots + waste_ips + waste_load_balancers + waste_nat_gateways + waste_stopped_instances + waste_target_groups + waste_enis + waste_amis + waste_rds + waste_cloudfront + waste_lambda + waste_s3 + waste_ecs + waste_api_gateway
         
         if all_waste_items:
             # Calculate costs
@@ -109,6 +112,7 @@ def scan(profile, region, output):
             click.echo(f"{Fore.GREEN}✓ Found {len(waste_lambda)} unused/over-provisioned Lambda functions{Style.RESET_ALL}")
             click.echo(f"{Fore.GREEN}✓ Found {len(waste_s3)} empty/unused S3 buckets{Style.RESET_ALL}")
             click.echo(f"{Fore.GREEN}✓ Found {len(waste_ecs)} unused/underutilized ECS services{Style.RESET_ALL}")
+            click.echo(f"{Fore.GREEN}✓ Found {len(waste_api_gateway)} unused API Gateway APIs{Style.RESET_ALL}")
             click.echo(f"{Fore.GREEN}✓ Total waste items: {len(all_waste_items)}{Style.RESET_ALL}")
             click.echo(f"{Fore.CYAN}💰 Potential monthly savings: £{savings['total_monthly_savings']}{Style.RESET_ALL}")
             click.echo(f"{Fore.CYAN}💰 Potential annual savings: £{savings['total_annual_savings']}{Style.RESET_ALL}")
