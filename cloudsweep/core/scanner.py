@@ -17,6 +17,7 @@ from scanners.ec2_instances import EC2InstanceScanner
 from scanners.target_groups import TargetGroupScanner
 from scanners.network_interfaces import NetworkInterfaceScanner
 from scanners.amis import AMIScanner
+from scanners.rds_instances import scan_rds_instances
 
 class AWSScanner:
     def __init__(self, profile='default', region='us-east-1'):
@@ -123,6 +124,10 @@ class AWSScanner:
         """Find old/unused AMIs incurring storage costs"""
         ami_scanner = AMIScanner(self.ec2_client)
         return ami_scanner.scan_old_unused_amis()
+    
+    def scan_rds_instances(self):
+        """Find stopped and unused RDS instances incurring costs"""
+        return scan_rds_instances(self.session, self.region)
     
     def get_account_info(self):
         """Get AWS account information"""

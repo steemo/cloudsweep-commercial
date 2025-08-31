@@ -22,6 +22,8 @@ class AWSScanner:
         self.session = None
         self.ec2 = None
         self.elbv2 = None
+        self.rds = None
+        self.cloudwatch = None
         
     def connect(self):
         try:
@@ -34,6 +36,8 @@ class AWSScanner:
             
             self.ec2 = self.session.client('ec2')
             self.elbv2 = self.session.client('elbv2')
+            self.rds = self.session.client('rds')
+            self.cloudwatch = self.session.client('cloudwatch')
             
         except ProfileNotFound:
             # Fallback to default credentials (CloudShell, EC2 roles, etc.)
@@ -41,6 +45,8 @@ class AWSScanner:
                 self.session = boto3.Session(region_name=self.region)
                 self.ec2 = self.session.client('ec2')
                 self.elbv2 = self.session.client('elbv2')
+                self.rds = self.session.client('rds')
+                self.cloudwatch = self.session.client('cloudwatch')
             except (NoCredentialsError, ClientError) as e:
                 raise Exception(f"AWS credentials not found. In CloudShell they should be automatic. Try: aws sts get-caller-identity")
         except (NoCredentialsError, ClientError) as e:
@@ -233,6 +239,69 @@ class AWSScanner:
         except Exception as e:
             print(f"Error scanning AMIs: {e}")
         return amis
+    
+    def scan_rds_instances(self):
+        rds_instances = []
+        try:
+            response = self.rds.describe_db_instances()
+            for instance in response['DBInstances']:
+                db_id = instance['DBInstanceIdentifier']
+                status = instance['DBInstanceStatus']
+                created_time = instance['InstanceCreateTime']
+                age_days = (datetime.now(timezone.utc) - created_time).days
+                
+                if age_days > 30:  # Only check instances older than 30 days
+                    if status == 'stopped':
+                        # Stopped instance still incurring storage costs
+                        storage_gb = instance.get('AllocatedStorage', 0)
+                        rds_instances.append({
+                            'type': 'rds_stopped',
+                            'id': db_id,
+                            'instance_class': instance['DBInstanceClass'],
+                            'engine': instance['Engine'],
+                            'storage_gb': storage_gb,
+                            'age_days': age_days,
+                            'created': created_time.isoformat()
+                        })
+                    elif status == 'available':
+                        # Check if unused (no connections)
+                        if self._check_rds_unused(db_id):
+                            rds_instances.append({
+                                'type': 'rds_unused',
+                                'id': db_id,
+                                'instance_class': instance['DBInstanceClass'],
+                                'engine': instance['Engine'],
+                                'storage_gb': instance.get('AllocatedStorage', 0),
+                                'age_days': age_days,
+                                'created': created_time.isoformat()
+                            })
+        except Exception as e:
+            print(f"Error scanning RDS instances: {e}")
+        return rds_instances
+    
+    def _check_rds_unused(self, db_instance_id):
+        try:
+            from datetime import timedelta
+            end_time = datetime.utcnow()
+            start_time = end_time - timedelta(days=30)
+            
+            response = self.cloudwatch.get_metric_statistics(
+                Namespace='AWS/RDS',
+                MetricName='DatabaseConnections',
+                Dimensions=[{'Name': 'DBInstanceIdentifier', 'Value': db_instance_id}],
+                StartTime=start_time,
+                EndTime=end_time,
+                Period=86400,
+                Statistics=['Maximum']
+            )
+            
+            if not response['Datapoints']:
+                return True
+            
+            max_connections = max([point['Maximum'] for point in response['Datapoints']])
+            return max_connections == 0
+        except Exception:
+            return False  # Conservative approach
 
 class CostCalculator:
     def __init__(self, region='us-east-1'):
@@ -296,6 +365,24 @@ class CostCalculator:
         elif item_type == 'ami':
             return item.get('size_gb', 8) * self.pricing['ami_storage']
         
+        elif item_type == 'rds_stopped':
+            return item.get('storage_gb', 20) * 0.115  # Storage cost only
+        
+        elif item_type == 'rds_unused':
+            # Simplified RDS instance pricing
+            instance_class = item.get('instance_class', 'db.t3.micro')
+            base_costs = {
+                'db.t3.micro': 18.50,
+                'db.t3.small': 37.00,
+                'db.t3.medium': 74.00,
+                'db.t3.large': 148.00,
+                'db.m5.large': 185.00,
+                'db.m5.xlarge': 370.00,
+                'db.r5.large': 230.00,
+                'db.r5.xlarge': 460.00
+            }
+            return base_costs.get(instance_class, 100.00)
+        
         return 0
 
 @click.group()
@@ -337,6 +424,7 @@ def scan(profile, region, output):
         waste_items.extend(scanner.scan_orphaned_target_groups())
         waste_items.extend(scanner.scan_unattached_enis())
         waste_items.extend(scanner.scan_old_unused_amis())
+        waste_items.extend(scanner.scan_rds_instances())
         
         if waste_items:
             savings = cost_calc.calculate_total_savings(waste_items)
