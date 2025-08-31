@@ -18,6 +18,7 @@ from scanners.target_groups import TargetGroupScanner
 from scanners.network_interfaces import NetworkInterfaceScanner
 from scanners.amis import AMIScanner
 from scanners.rds_instances import scan_rds_instances
+from scanners.cloudfront_distributions import scan_cloudfront_distributions
 
 class AWSScanner:
     def __init__(self, profile='default', region='us-east-1'):
@@ -128,6 +129,10 @@ class AWSScanner:
     def scan_rds_instances(self):
         """Find stopped and unused RDS instances incurring costs"""
         return scan_rds_instances(self.session, self.region)
+    
+    def scan_cloudfront_distributions(self):
+        """Find unused CloudFront distributions incurring costs"""
+        return scan_cloudfront_distributions(self.session, self.region)
     
     def get_account_info(self):
         """Get AWS account information"""

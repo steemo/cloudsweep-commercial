@@ -24,6 +24,7 @@ class AWSScanner:
         self.elbv2 = None
         self.rds = None
         self.cloudwatch = None
+        self.cloudfront = None
         
     def connect(self):
         try:
@@ -38,6 +39,7 @@ class AWSScanner:
             self.elbv2 = self.session.client('elbv2')
             self.rds = self.session.client('rds')
             self.cloudwatch = self.session.client('cloudwatch')
+            self.cloudfront = self.session.client('cloudfront', region_name='us-east-1')
             
         except ProfileNotFound:
             # Fallback to default credentials (CloudShell, EC2 roles, etc.)
@@ -47,6 +49,7 @@ class AWSScanner:
                 self.elbv2 = self.session.client('elbv2')
                 self.rds = self.session.client('rds')
                 self.cloudwatch = self.session.client('cloudwatch')
+                self.cloudfront = self.session.client('cloudfront', region_name='us-east-1')
             except (NoCredentialsError, ClientError) as e:
                 raise Exception(f"AWS credentials not found. In CloudShell they should be automatic. Try: aws sts get-caller-identity")
         except (NoCredentialsError, ClientError) as e:
@@ -302,6 +305,61 @@ class AWSScanner:
             return max_connections == 0
         except Exception:
             return False  # Conservative approach
+    
+    def scan_cloudfront_distributions(self):
+        distributions = []
+        try:
+            response = self.cloudfront.list_distributions()
+            if 'Items' not in response['DistributionList']:
+                return distributions
+                
+            for dist in response['DistributionList']['Items']:
+                dist_id = dist['Id']
+                domain_name = dist['DomainName']
+                enabled = dist['Enabled']
+                last_modified = dist['LastModifiedTime']
+                age_days = (datetime.now(timezone.utc) - last_modified).days
+                
+                if age_days > 30 and enabled:  # Only check old, enabled distributions
+                    if self._check_cloudfront_unused(dist_id):
+                        distributions.append({
+                            'type': 'cloudfront_distribution',
+                            'id': dist_id,
+                            'domain_name': domain_name,
+                            'status': dist['Status'],
+                            'age_days': age_days,
+                            'last_modified': last_modified.isoformat()
+                        })
+        except Exception as e:
+            print(f"Error scanning CloudFront distributions: {e}")
+        return distributions
+    
+    def _check_cloudfront_unused(self, distribution_id):
+        try:
+            from datetime import timedelta
+            end_time = datetime.utcnow()
+            start_time = end_time - timedelta(days=30)
+            
+            # CloudWatch metrics for CloudFront are in us-east-1
+            cloudwatch_us = self.session.client('cloudwatch', region_name='us-east-1')
+            
+            response = cloudwatch_us.get_metric_statistics(
+                Namespace='AWS/CloudFront',
+                MetricName='Requests',
+                Dimensions=[{'Name': 'DistributionId', 'Value': distribution_id}],
+                StartTime=start_time,
+                EndTime=end_time,
+                Period=86400,
+                Statistics=['Sum']
+            )
+            
+            if not response['Datapoints']:
+                return True
+            
+            total_requests = sum([point['Sum'] for point in response['Datapoints']])
+            return total_requests == 0
+        except Exception:
+            return False  # Conservative approach
 
 class CostCalculator:
     def __init__(self, region='us-east-1'):
@@ -383,6 +441,9 @@ class CostCalculator:
             }
             return base_costs.get(instance_class, 100.00)
         
+        elif item_type == 'cloudfront_distribution':
+            return 15.00  # Estimated monthly cost for unused CloudFront distribution
+        
         return 0
 
 @click.group()
@@ -425,6 +486,7 @@ def scan(profile, region, output):
         waste_items.extend(scanner.scan_unattached_enis())
         waste_items.extend(scanner.scan_old_unused_amis())
         waste_items.extend(scanner.scan_rds_instances())
+        waste_items.extend(scanner.scan_cloudfront_distributions())
         
         if waste_items:
             savings = cost_calc.calculate_total_savings(waste_items)

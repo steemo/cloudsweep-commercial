@@ -76,8 +76,11 @@ def scan(profile, region, output):
         click.echo(f"{Fore.YELLOW}Scanning for stopped/unused RDS instances...{Style.RESET_ALL}")
         waste_rds = scanner.scan_rds_instances()
         
+        click.echo(f"{Fore.YELLOW}Scanning for unused CloudFront distributions...{Style.RESET_ALL}")
+        waste_cloudfront = scanner.scan_cloudfront_distributions()
+        
         # Combine all waste items
-        all_waste_items = waste_volumes + waste_snapshots + waste_ips + waste_load_balancers + waste_nat_gateways + waste_stopped_instances + waste_target_groups + waste_enis + waste_amis + waste_rds
+        all_waste_items = waste_volumes + waste_snapshots + waste_ips + waste_load_balancers + waste_nat_gateways + waste_stopped_instances + waste_target_groups + waste_enis + waste_amis + waste_rds + waste_cloudfront
         
         if all_waste_items:
             # Calculate costs
@@ -93,6 +96,7 @@ def scan(profile, region, output):
             click.echo(f"{Fore.GREEN}✓ Found {len(waste_enis)} unattached network interfaces{Style.RESET_ALL}")
             click.echo(f"{Fore.GREEN}✓ Found {len(waste_amis)} old/unused AMIs{Style.RESET_ALL}")
             click.echo(f"{Fore.GREEN}✓ Found {len(waste_rds)} stopped/unused RDS instances{Style.RESET_ALL}")
+            click.echo(f"{Fore.GREEN}✓ Found {len(waste_cloudfront)} unused CloudFront distributions{Style.RESET_ALL}")
             click.echo(f"{Fore.GREEN}✓ Total waste items: {len(all_waste_items)}{Style.RESET_ALL}")
             click.echo(f"{Fore.CYAN}💰 Potential monthly savings: £{savings['total_monthly_savings']}{Style.RESET_ALL}")
             click.echo(f"{Fore.CYAN}💰 Potential annual savings: £{savings['total_annual_savings']}{Style.RESET_ALL}")
