@@ -612,28 +612,54 @@ def scan(profile, region, output):
         account_info = scanner.get_account_info()
         click.echo(f"Account: {account_info['account_id']}")
         
-        # Scan all resource types
-        click.echo(f"{Fore.YELLOW}Scanning AWS resources...{Style.RESET_ALL}")
-        
+        # Scan all resource types with detailed progress
         waste_items = []
+        
+        click.echo(f"{Fore.YELLOW}🔍 Scanning EBS volumes...{Style.RESET_ALL}")
         waste_items.extend(scanner.scan_unattached_volumes())
+        
+        click.echo(f"{Fore.YELLOW}🔍 Scanning EBS snapshots...{Style.RESET_ALL}")
         waste_items.extend(scanner.scan_orphaned_snapshots())
+        
+        click.echo(f"{Fore.YELLOW}🔍 Scanning Elastic IPs...{Style.RESET_ALL}")
         waste_items.extend(scanner.scan_unassociated_ips())
+        
+        click.echo(f"{Fore.YELLOW}🔍 Scanning Load Balancers...{Style.RESET_ALL}")
         waste_items.extend(scanner.scan_unused_load_balancers())
+        
+        click.echo(f"{Fore.YELLOW}🔍 Scanning NAT Gateways...{Style.RESET_ALL}")
         waste_items.extend(scanner.scan_unused_nat_gateways())
+        
+        click.echo(f"{Fore.YELLOW}🔍 Scanning stopped EC2 instances...{Style.RESET_ALL}")
         waste_items.extend(scanner.scan_stopped_instances())
+        
+        click.echo(f"{Fore.YELLOW}🔍 Scanning Target Groups...{Style.RESET_ALL}")
         waste_items.extend(scanner.scan_orphaned_target_groups())
+        
+        click.echo(f"{Fore.YELLOW}🔍 Scanning Network Interfaces...{Style.RESET_ALL}")
         waste_items.extend(scanner.scan_unattached_enis())
+        
+        click.echo(f"{Fore.YELLOW}🔍 Scanning AMIs...{Style.RESET_ALL}")
         waste_items.extend(scanner.scan_old_unused_amis())
+        
+        click.echo(f"{Fore.YELLOW}🔍 Scanning RDS instances...{Style.RESET_ALL}")
         waste_items.extend(scanner.scan_rds_instances())
+        
+        click.echo(f"{Fore.YELLOW}🔍 Scanning CloudFront distributions...{Style.RESET_ALL}")
         waste_items.extend(scanner.scan_cloudfront_distributions())
+        
+        click.echo(f"{Fore.YELLOW}🔍 Scanning Lambda functions...{Style.RESET_ALL}")
         waste_items.extend(scanner.scan_lambda_functions())
+        
+        click.echo(f"{Fore.YELLOW}🔍 Scanning S3 buckets...{Style.RESET_ALL}")
         waste_items.extend(scanner.scan_s3_buckets())
+        
+        click.echo(f"{Fore.GREEN}✅ Scan complete!{Style.RESET_ALL}")
         
         if waste_items:
             savings = cost_calc.calculate_total_savings(waste_items)
             
-            click.echo(f"{Fore.GREEN}✓ Found {len(waste_items)} waste items{Style.RESET_ALL}")
+            click.echo(f"{Fore.GREEN}🎯 Found {len(waste_items)} waste items across 13 AWS services{Style.RESET_ALL}")
             click.echo(f"{Fore.CYAN}💰 Monthly savings: £{savings['total_monthly_savings']}{Style.RESET_ALL}")
             click.echo(f"{Fore.CYAN}💰 Annual savings: £{savings['total_annual_savings']}{Style.RESET_ALL}")
             
