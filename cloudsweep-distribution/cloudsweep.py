@@ -25,11 +25,20 @@ class AWSScanner:
         
     def connect(self):
         try:
+            # Try with profile first
             self.session = boto3.Session(profile_name=self.profile, region_name=self.region)
             self.ec2 = self.session.client('ec2')
             self.elbv2 = self.session.client('elbv2')
-        except (NoCredentialsError, ProfileNotFound) as e:
-            raise Exception(f"AWS credentials error: {e}")
+        except ProfileNotFound:
+            # Fallback to default credentials (CloudShell, EC2 roles, etc.)
+            try:
+                self.session = boto3.Session(region_name=self.region)
+                self.ec2 = self.session.client('ec2')
+                self.elbv2 = self.session.client('elbv2')
+            except (NoCredentialsError, ProfileNotFound) as e:
+                raise Exception(f"AWS credentials error: {e}. Try: aws configure")
+        except (NoCredentialsError, ClientError) as e:
+            raise Exception(f"AWS credentials error: {e}. Try: aws configure")
     
     def get_account_info(self):
         try:
@@ -290,7 +299,7 @@ def cli():
     pass
 
 @cli.command()
-@click.option('--profile', default='default', help='AWS profile to use')
+@click.option('--profile', default=None, help='AWS profile to use (optional in CloudShell)')
 @click.option('--region', default='us-east-1', help='AWS region to scan')
 @click.option('--output', default='scan-results.json', help='Output file for results')
 def scan(profile, region, output):
@@ -300,7 +309,7 @@ def scan(profile, region, output):
     click.echo(f"Region: {region}")
     
     try:
-        scanner = AWSScanner(profile=profile, region=region)
+        scanner = AWSScanner(profile=profile or 'default', region=region)
         cost_calc = CostCalculator(region=region)
         
         click.echo(f"{Fore.YELLOW}Connecting to AWS...{Style.RESET_ALL}")

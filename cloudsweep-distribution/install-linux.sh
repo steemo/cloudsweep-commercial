@@ -56,7 +56,8 @@ esac
 
 # Install Python dependencies
 echo "🐍 Installing Python dependencies..."
-pip3 install --upgrade pip
+# Try to upgrade pip, but don't fail if it's RPM-managed
+pip3 install --upgrade pip --user 2>/dev/null || echo "⚠️  Pip managed by system, continuing..."
 pip3 install -r requirements.txt
 
 # Check if executable exists
