@@ -25,20 +25,26 @@ class AWSScanner:
         
     def connect(self):
         try:
-            # Try with profile first
-            self.session = boto3.Session(profile_name=self.profile, region_name=self.region)
+            # If no profile specified or profile is None, use default credential chain
+            if self.profile is None or self.profile == 'None':
+                self.session = boto3.Session(region_name=self.region)
+            else:
+                # Try with specified profile
+                self.session = boto3.Session(profile_name=self.profile, region_name=self.region)
+            
             self.ec2 = self.session.client('ec2')
             self.elbv2 = self.session.client('elbv2')
+            
         except ProfileNotFound:
             # Fallback to default credentials (CloudShell, EC2 roles, etc.)
             try:
                 self.session = boto3.Session(region_name=self.region)
                 self.ec2 = self.session.client('ec2')
                 self.elbv2 = self.session.client('elbv2')
-            except (NoCredentialsError, ProfileNotFound) as e:
-                raise Exception(f"AWS credentials error: {e}. Try: aws configure")
+            except (NoCredentialsError, ClientError) as e:
+                raise Exception(f"AWS credentials not found. In CloudShell they should be automatic. Try: aws sts get-caller-identity")
         except (NoCredentialsError, ClientError) as e:
-            raise Exception(f"AWS credentials error: {e}. Try: aws configure")
+            raise Exception(f"AWS credentials not found. In CloudShell they should be automatic. Try: aws sts get-caller-identity")
     
     def get_account_info(self):
         try:
@@ -309,7 +315,7 @@ def scan(profile, region, output):
     click.echo(f"Region: {region}")
     
     try:
-        scanner = AWSScanner(profile=profile or 'default', region=region)
+        scanner = AWSScanner(profile=profile, region=region)
         cost_calc = CostCalculator(region=region)
         
         click.echo(f"{Fore.YELLOW}Connecting to AWS...{Style.RESET_ALL}")
