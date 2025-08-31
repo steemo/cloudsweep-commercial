@@ -25,6 +25,7 @@ from scanners.ecs_services import scan_ecs_services
 from scanners.api_gateway import scan_api_gateway
 from scanners.elasticsearch import scan_elasticsearch_clusters
 from scanners.redshift import scan_redshift_clusters
+from scanners.cloudwatch_logs import scan_cloudwatch_log_groups
 
 class AWSScanner:
     def __init__(self, profile='default', region='us-east-1'):
@@ -163,6 +164,10 @@ class AWSScanner:
     def scan_redshift_clusters(self, days=30):
         """Find unused and underutilized Redshift clusters incurring costs"""
         return scan_redshift_clusters(self.session, self.region, days)
+    
+    def scan_cloudwatch_log_groups(self, days=60):
+        """Find unused and over-retained CloudWatch Log Groups incurring costs"""
+        return scan_cloudwatch_log_groups(self.session, self.region, days)
     
     def get_account_info(self):
         """Get AWS account information"""

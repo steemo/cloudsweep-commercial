@@ -60,6 +60,7 @@ class AWSScanner:
         self.es = None
         self.opensearch = None
         self.redshift = None
+        self.logs = None
         
     def connect(self):
         try:
@@ -83,6 +84,7 @@ class AWSScanner:
             self.es = self.session.client('es')
             self.opensearch = self.session.client('opensearch')
             self.redshift = self.session.client('redshift')
+            self.logs = self.session.client('logs')
             
         except ProfileNotFound:
             # Fallback to default credentials (CloudShell, EC2 roles, etc.)
@@ -101,6 +103,7 @@ class AWSScanner:
                 self.es = self.session.client('es')
                 self.opensearch = self.session.client('opensearch')
                 self.redshift = self.session.client('redshift')
+                self.logs = self.session.client('logs')
             except (NoCredentialsError, ClientError) as e:
                 raise Exception(f"AWS credentials not found. In CloudShell they should be automatic. Try: aws sts get-caller-identity")
         except (NoCredentialsError, ClientError) as e:
@@ -784,6 +787,69 @@ class AWSScanner:
             return max_connections == 0
         except Exception:
             return False
+    
+    def scan_cloudwatch_log_groups(self, days=60):
+        log_groups = []
+        try:
+            paginator = self.logs.get_paginator('describe_log_groups')
+            for page in paginator.paginate():
+                for log_group in page['logGroups']:
+                    log_group_name = log_group['logGroupName']
+                    creation_time = log_group['creationTime']
+                    retention_days = log_group.get('retentionInDays', None)
+                    stored_bytes = log_group.get('storedBytes', 0)
+                    
+                    # Convert creation time from epoch milliseconds
+                    created_date = datetime.fromtimestamp(creation_time / 1000)
+                    age_days = (datetime.now() - created_date).days
+                    
+                    if age_days > 30:  # Only check old log groups
+                        if self._check_log_group_unused(log_group_name, days):
+                            if stored_bytes > 0:  # Only flag if has storage cost
+                                log_groups.append({
+                                    'type': 'cloudwatch_log_unused',
+                                    'id': log_group_name,
+                                    'stored_bytes': stored_bytes,
+                                    'stored_gb': stored_bytes / (1024**3) if stored_bytes > 0 else 0,
+                                    'retention_days': retention_days,
+                                    'age_days': age_days,
+                                    'created': created_date.isoformat()
+                                })
+                        elif retention_days is None and stored_bytes > 1024**3:  # Over-retained
+                            log_groups.append({
+                                'type': 'cloudwatch_log_overretained',
+                                'id': log_group_name,
+                                'stored_bytes': stored_bytes,
+                                'stored_gb': stored_bytes / (1024**3),
+                                'retention_days': retention_days,
+                                'age_days': age_days,
+                                'created': created_date.isoformat()
+                            })
+        except Exception as e:
+            print(f"Error scanning CloudWatch Log Groups: {e}")
+        return log_groups
+    
+    def _check_log_group_unused(self, log_group_name, days):
+        try:
+            from datetime import timedelta
+            end_time = int(datetime.now().timestamp() * 1000)
+            start_time = int((datetime.now() - timedelta(days=days)).timestamp() * 1000)
+            
+            streams_response = self.logs.describe_log_streams(
+                logGroupName=log_group_name,
+                orderBy='LastEventTime',
+                descending=True,
+                limit=5
+            )
+            
+            for stream in streams_response['logStreams']:
+                last_event_time = stream.get('lastEventTime', 0)
+                if last_event_time > start_time:
+                    return False
+            
+            return True
+        except Exception:
+            return False
 
 class CostCalculator:
     def __init__(self, region='us-east-1'):
@@ -921,6 +987,14 @@ class CostCalculator:
             # Paused clusters only incur storage costs
             return 50.00  # Estimated monthly storage cost
         
+        elif item_type == 'cloudwatch_log_unused':
+            stored_gb = item.get('stored_gb', 0)
+            return stored_gb * 0.50  # £0.50 per GB/month for log storage
+        
+        elif item_type == 'cloudwatch_log_overretained':
+            stored_gb = item.get('stored_gb', 0)
+            return stored_gb * 0.50 * 0.7  # 70% potential savings from retention policy
+        
         return 0
 
 @click.group()
@@ -1005,12 +1079,15 @@ def scan(profile, region, output, days):
         click.echo(f"{Fore.YELLOW}🔍 Scanning Redshift clusters...{Style.RESET_ALL}")
         waste_items.extend(scanner.scan_redshift_clusters())
         
+        click.echo(f"{Fore.YELLOW}🔍 Scanning CloudWatch Log Groups...{Style.RESET_ALL}")
+        waste_items.extend(scanner.scan_cloudwatch_log_groups(days * 2))  # CloudWatch uses 2x multiplier
+        
         click.echo(f"{Fore.GREEN}✅ Scan complete!{Style.RESET_ALL}")
         
         if waste_items:
             savings = cost_calc.calculate_total_savings(waste_items)
             
-            click.echo(f"{Fore.GREEN}🎯 Found {len(waste_items)} waste items across 17 AWS services{Style.RESET_ALL}")
+            click.echo(f"{Fore.GREEN}🎯 Found {len(waste_items)} waste items across 18 AWS services{Style.RESET_ALL}")
             click.echo(f"{Fore.CYAN}💰 Monthly savings: £{savings['total_monthly_savings']}{Style.RESET_ALL}")
             click.echo(f"{Fore.CYAN}💰 Annual savings: £{savings['total_annual_savings']}{Style.RESET_ALL}")
             
