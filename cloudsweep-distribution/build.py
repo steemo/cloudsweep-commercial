@@ -159,17 +159,50 @@ def check_windows_dependencies():
     return False
 
 def install_pyinstaller():
-    """Install PyInstaller if not available"""
+    """Install PyInstaller if not available with multiple fallback methods"""
     try:
         import PyInstaller
         return True
     except ImportError:
         print("📦 Installing PyInstaller...")
+        
+        # Try multiple installation methods
+        install_methods = [
+            [sys.executable, '-m', 'pip', 'install', 'pyinstaller'],
+            ['pip3', 'install', 'pyinstaller'],
+            ['pip', 'install', 'pyinstaller'],
+            [sys.executable, '-m', 'pip', 'install', '--user', 'pyinstaller']
+        ]
+        
+        for method in install_methods:
+            try:
+                print(f"🔧 Trying: {' '.join(method)}")
+                result = subprocess.run(method, check=True, capture_output=True, text=True)
+                print("✅ PyInstaller installed successfully")
+                
+                # Verify installation
+                try:
+                    import PyInstaller
+                    return True
+                except ImportError:
+                    continue
+                    
+            except subprocess.CalledProcessError as e:
+                print(f"❌ Method failed: {e}")
+                if e.stderr:
+                    print(f"Error details: {e.stderr[:200]}...")
+                continue
+        
+        # If all methods failed, try upgrading pip first
+        print("🔄 Upgrading pip and retrying...")
         try:
+            subprocess.run([sys.executable, '-m', 'pip', 'install', '--upgrade', 'pip'], 
+                         check=True, capture_output=True)
             subprocess.run([sys.executable, '-m', 'pip', 'install', 'pyinstaller'], 
                          check=True, capture_output=True)
             return True
-        except subprocess.CalledProcessError:
+        except subprocess.CalledProcessError as e:
+            print(f"❌ Final attempt failed: {e}")
             return False
 
 def clean_build_artifacts():
