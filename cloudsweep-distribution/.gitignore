@@ -1,0 +1,23 @@
+# PyInstaller build artifacts
+build/
+dist/
+*.spec
+
+# Built executables (users will build their own)
+executables/
+
+# CloudSweep scan results
+scan-results.json
+*-results.json
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# macOS
+.DS_Store
+
+# Temporary files
+*.tmp
+*.temp
