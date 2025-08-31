@@ -4,11 +4,38 @@ CloudSweep - Automated AWS Cost Optimization Tool
 Standalone version for distribution
 """
 
+import sys
+import subprocess
+
+def install_missing_dependencies():
+    """Auto-install missing Python dependencies"""
+    required_packages = ['boto3', 'click', 'colorama']
+    missing_packages = []
+    
+    for package in required_packages:
+        try:
+            __import__(package)
+        except ImportError:
+            missing_packages.append(package)
+    
+    if missing_packages:
+        print(f"📦 Installing missing dependencies: {', '.join(missing_packages)}")
+        try:
+            subprocess.run([sys.executable, '-m', 'pip', 'install'] + missing_packages, 
+                         check=True, capture_output=True)
+            print("✅ Dependencies installed successfully")
+        except subprocess.CalledProcessError as e:
+            print(f"❌ Failed to install dependencies: {e}")
+            print("Please run: pip3 install boto3 click colorama")
+            sys.exit(1)
+
+# Auto-install dependencies before importing
+install_missing_dependencies()
+
 import boto3
 import click
 import json
 from colorama import init, Fore, Style
-import sys
 from datetime import datetime, timezone
 from botocore.exceptions import ClientError, NoCredentialsError, ProfileNotFound
 
