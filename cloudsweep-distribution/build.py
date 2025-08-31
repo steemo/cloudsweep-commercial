@@ -288,7 +288,8 @@ def main():
     print(f"🔨 Building {platform_name} executable...")
     
     cmd = [
-        'pyinstaller',
+        sys.executable,
+        '-m', 'PyInstaller',
         '--onefile',
         '--name', exe_name.replace('.exe', ''),  # Remove .exe for PyInstaller
         'cloudsweep.py'
