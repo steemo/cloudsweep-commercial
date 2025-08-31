@@ -180,12 +180,22 @@ def install_pyinstaller():
                 result = subprocess.run(method, check=True, capture_output=True, text=True)
                 print("✅ PyInstaller installed successfully")
                 
-                # Verify installation
+                # Verify installation (reload modules to detect user installs)
                 try:
+                    import importlib
+                    import sys
+                    if 'PyInstaller' in sys.modules:
+                        importlib.reload(sys.modules['PyInstaller'])
                     import PyInstaller
                     return True
                 except ImportError:
-                    continue
+                    # For --user installs, try importing after adding user site
+                    try:
+                        import site
+                        import PyInstaller
+                        return True
+                    except ImportError:
+                        continue
                     
             except subprocess.CalledProcessError as e:
                 print(f"❌ Method failed: {e}")
@@ -193,16 +203,24 @@ def install_pyinstaller():
                     print(f"Error details: {e.stderr[:200]}...")
                 continue
         
-        # If all methods failed, try upgrading pip first
-        print("🔄 Upgrading pip and retrying...")
+        # Final attempt: force reinstall to handle packaging conflicts
+        print("🔄 Final attempt: force reinstall to handle conflicts...")
         try:
-            subprocess.run([sys.executable, '-m', 'pip', 'install', '--upgrade', 'pip'], 
+            subprocess.run([sys.executable, '-m', 'pip', 'install', '--user', '--force-reinstall', 'pyinstaller'], 
                          check=True, capture_output=True)
-            subprocess.run([sys.executable, '-m', 'pip', 'install', 'pyinstaller'], 
-                         check=True, capture_output=True)
-            return True
+            
+            # Final verification
+            try:
+                import site
+                import PyInstaller
+                print("✅ PyInstaller force install successful")
+                return True
+            except ImportError:
+                print("❌ PyInstaller still not importable after force install")
+                return False
+                
         except subprocess.CalledProcessError as e:
-            print(f"❌ Final attempt failed: {e}")
+            print(f"❌ Force install failed: {e}")
             return False
 
 def clean_build_artifacts():
