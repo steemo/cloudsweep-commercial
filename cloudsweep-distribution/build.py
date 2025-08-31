@@ -22,8 +22,90 @@ def detect_platform():
     else:  # Linux and others
         return 'linux', 'cloudsweep-linux'
 
+def detect_linux_distro():
+    """Detect Linux distribution and return package manager info"""
+    try:
+        # Check /etc/os-release first
+        with open('/etc/os-release', 'r') as f:
+            os_release = f.read().lower()
+        
+        if 'amazon' in os_release or 'amzn' in os_release:
+            return 'amazon', 'yum'
+        elif 'ubuntu' in os_release or 'debian' in os_release:
+            return 'debian', 'apt-get'
+        elif 'centos' in os_release or 'rhel' in os_release or 'red hat' in os_release:
+            return 'rhel', 'yum'
+        elif 'fedora' in os_release:
+            return 'fedora', 'dnf'
+        elif 'alpine' in os_release:
+            return 'alpine', 'apk'
+        elif 'suse' in os_release:
+            return 'suse', 'zypper'
+    except FileNotFoundError:
+        pass
+    
+    # Fallback: check for package managers
+    if shutil.which('yum'):
+        return 'rhel', 'yum'
+    elif shutil.which('apt-get'):
+        return 'debian', 'apt-get'
+    elif shutil.which('dnf'):
+        return 'fedora', 'dnf'
+    elif shutil.which('apk'):
+        return 'alpine', 'apk'
+    elif shutil.which('zypper'):
+        return 'suse', 'zypper'
+    
+    return 'unknown', 'unknown'
+
+def install_linux_dependencies():
+    """Automatically install Linux dependencies based on detected distro"""
+    distro, pkg_manager = detect_linux_distro()
+    
+    print(f"🔍 Detected: {distro} with {pkg_manager}")
+    print("📦 Installing build dependencies...")
+    
+    try:
+        if pkg_manager == 'yum':
+            # Amazon Linux, CentOS, RHEL
+            subprocess.run(['sudo', 'yum', 'update', '-y'], check=True, capture_output=True)
+            subprocess.run(['sudo', 'yum', 'groupinstall', '-y', 'Development Tools'], check=True, capture_output=True)
+            subprocess.run(['sudo', 'yum', 'install', '-y', 'gcc', 'gcc-c++', 'binutils', 'python3-devel'], check=True, capture_output=True)
+        
+        elif pkg_manager == 'apt-get':
+            # Ubuntu, Debian
+            subprocess.run(['sudo', 'apt-get', 'update', '-y'], check=True, capture_output=True)
+            subprocess.run(['sudo', 'apt-get', 'install', '-y', 'build-essential', 'binutils', 'python3-dev'], check=True, capture_output=True)
+        
+        elif pkg_manager == 'dnf':
+            # Fedora
+            subprocess.run(['sudo', 'dnf', 'update', '-y'], check=True, capture_output=True)
+            subprocess.run(['sudo', 'dnf', 'groupinstall', '-y', 'Development Tools'], check=True, capture_output=True)
+            subprocess.run(['sudo', 'dnf', 'install', '-y', 'gcc', 'gcc-c++', 'binutils', 'python3-devel'], check=True, capture_output=True)
+        
+        elif pkg_manager == 'apk':
+            # Alpine
+            subprocess.run(['sudo', 'apk', 'update'], check=True, capture_output=True)
+            subprocess.run(['sudo', 'apk', 'add', 'gcc', 'musl-dev', 'binutils', 'python3-dev', 'make'], check=True, capture_output=True)
+        
+        elif pkg_manager == 'zypper':
+            # openSUSE
+            subprocess.run(['sudo', 'zypper', 'refresh'], check=True, capture_output=True)
+            subprocess.run(['sudo', 'zypper', 'install', '-y', 'gcc', 'gcc-c++', 'binutils', 'python3-devel'], check=True, capture_output=True)
+        
+        else:
+            print(f"❌ Unsupported package manager: {pkg_manager}")
+            return False
+        
+        print("✅ Dependencies installed successfully")
+        return True
+        
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Failed to install dependencies: {e}")
+        return False
+
 def check_linux_dependencies():
-    """Check if required Linux dependencies are available"""
+    """Check if required Linux dependencies are available, install if missing"""
     required_commands = ['gcc', 'objdump']
     missing = []
     
@@ -33,12 +115,23 @@ def check_linux_dependencies():
     
     if missing:
         print(f"❌ Missing system dependencies: {', '.join(missing)}")
-        print("📋 Required packages:")
-        print("  Ubuntu/Debian: sudo apt-get install build-essential binutils")
-        print("  CentOS/RHEL:   sudo yum install gcc gcc-c++ binutils")
-        print("  Fedora:        sudo dnf install gcc gcc-c++ binutils")
-        print("  Alpine:        sudo apk add gcc musl-dev binutils")
-        return False
+        print("🔧 Attempting automatic installation...")
+        
+        if install_linux_dependencies():
+            # Re-check after installation
+            still_missing = []
+            for cmd in required_commands:
+                if not shutil.which(cmd):
+                    still_missing.append(cmd)
+            
+            if still_missing:
+                print(f"❌ Still missing after installation: {', '.join(still_missing)}")
+                return False
+            else:
+                print("✅ All dependencies now available")
+                return True
+        else:
+            return False
     
     return True
 
