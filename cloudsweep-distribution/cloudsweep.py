@@ -59,6 +59,7 @@ class AWSScanner:
         self.apigatewayv2 = None
         self.es = None
         self.opensearch = None
+        self.redshift = None
         
     def connect(self):
         try:
@@ -81,6 +82,7 @@ class AWSScanner:
             self.apigatewayv2 = self.session.client('apigatewayv2')
             self.es = self.session.client('es')
             self.opensearch = self.session.client('opensearch')
+            self.redshift = self.session.client('redshift')
             
         except ProfileNotFound:
             # Fallback to default credentials (CloudShell, EC2 roles, etc.)
@@ -98,6 +100,7 @@ class AWSScanner:
                 self.apigatewayv2 = self.session.client('apigatewayv2')
                 self.es = self.session.client('es')
                 self.opensearch = self.session.client('opensearch')
+                self.redshift = self.session.client('redshift')
             except (NoCredentialsError, ClientError) as e:
                 raise Exception(f"AWS credentials not found. In CloudShell they should be automatic. Try: aws sts get-caller-identity")
         except (NoCredentialsError, ClientError) as e:
@@ -721,6 +724,66 @@ class AWSScanner:
             return total_searches == 0
         except Exception:
             return False
+    
+    def scan_redshift_clusters(self):
+        clusters = []
+        try:
+            response = self.redshift.describe_clusters()
+            for cluster in response['Clusters']:
+                cluster_identifier = cluster['ClusterIdentifier']
+                cluster_status = cluster['ClusterStatus']
+                created_time = cluster['ClusterCreateTime']
+                age_days = (datetime.now(timezone.utc) - created_time.replace(tzinfo=timezone.utc)).days
+                
+                if age_days > 30:  # Only check old clusters
+                    if cluster_status == 'paused':
+                        clusters.append({
+                            'type': 'redshift_paused',
+                            'id': cluster_identifier,
+                            'status': cluster_status,
+                            'node_type': cluster['NodeType'],
+                            'number_of_nodes': cluster['NumberOfNodes'],
+                            'age_days': age_days,
+                            'created': created_time.isoformat()
+                        })
+                    elif cluster_status == 'available':
+                        if self._check_redshift_unused(cluster_identifier):
+                            clusters.append({
+                                'type': 'redshift_unused',
+                                'id': cluster_identifier,
+                                'status': cluster_status,
+                                'node_type': cluster['NodeType'],
+                                'number_of_nodes': cluster['NumberOfNodes'],
+                                'age_days': age_days,
+                                'created': created_time.isoformat()
+                            })
+        except Exception as e:
+            print(f"Error scanning Redshift clusters: {e}")
+        return clusters
+    
+    def _check_redshift_unused(self, cluster_identifier):
+        try:
+            from datetime import timedelta
+            end_time = datetime.utcnow()
+            start_time = end_time - timedelta(days=30)
+            
+            response = self.cloudwatch.get_metric_statistics(
+                Namespace='AWS/Redshift',
+                MetricName='DatabaseConnections',
+                Dimensions=[{'Name': 'ClusterIdentifier', 'Value': cluster_identifier}],
+                StartTime=start_time,
+                EndTime=end_time,
+                Period=86400,
+                Statistics=['Maximum']
+            )
+            
+            if not response['Datapoints']:
+                return True
+            
+            max_connections = max([point['Maximum'] for point in response['Datapoints']])
+            return max_connections == 0
+        except Exception:
+            return False
 
 class CostCalculator:
     def __init__(self, region='us-east-1'):
@@ -840,6 +903,24 @@ class CostCalculator:
             base_cost = 50.00 if 'small' in instance_type else 120.00
             return base_cost * instance_count
         
+        elif item_type == 'redshift_unused':
+            node_type = item.get('node_type', 'dc2.large')
+            number_of_nodes = item.get('number_of_nodes', 1)
+            node_costs = {
+                'dc2.large': 180.00,
+                'dc2.8xlarge': 4800.00,
+                'ds2.xlarge': 850.00,
+                'ds2.8xlarge': 6800.00,
+                'ra3.xlplus': 3250.00,
+                'ra3.4xlarge': 13000.00
+            }
+            base_cost = node_costs.get(node_type, 500.00)
+            return base_cost * number_of_nodes
+        
+        elif item_type == 'redshift_paused':
+            # Paused clusters only incur storage costs
+            return 50.00  # Estimated monthly storage cost
+        
         return 0
 
 @click.group()
@@ -919,12 +1000,15 @@ def scan(profile, region, output):
         click.echo(f"{Fore.YELLOW}🔍 Scanning Elasticsearch/OpenSearch...{Style.RESET_ALL}")
         waste_items.extend(scanner.scan_elasticsearch_clusters())
         
+        click.echo(f"{Fore.YELLOW}🔍 Scanning Redshift clusters...{Style.RESET_ALL}")
+        waste_items.extend(scanner.scan_redshift_clusters())
+        
         click.echo(f"{Fore.GREEN}✅ Scan complete!{Style.RESET_ALL}")
         
         if waste_items:
             savings = cost_calc.calculate_total_savings(waste_items)
             
-            click.echo(f"{Fore.GREEN}🎯 Found {len(waste_items)} waste items across 16 AWS services{Style.RESET_ALL}")
+            click.echo(f"{Fore.GREEN}🎯 Found {len(waste_items)} waste items across 17 AWS services{Style.RESET_ALL}")
             click.echo(f"{Fore.CYAN}💰 Monthly savings: £{savings['total_monthly_savings']}{Style.RESET_ALL}")
             click.echo(f"{Fore.CYAN}💰 Annual savings: £{savings['total_annual_savings']}{Style.RESET_ALL}")
             
